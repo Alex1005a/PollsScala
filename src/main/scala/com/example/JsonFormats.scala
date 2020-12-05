@@ -32,9 +32,9 @@ object JsonFormats  {
   //implicit val optTimeJsonFormat: RootJsonFormat[Option[LocalDateTime]] = jsonFormat1(Option[LocalDateTime])
   implicit val voteJsonFormat: RootJsonFormat[Vote] = jsonFormat2(Vote)
   implicit val answerDtoJsonFormat: RootJsonFormat[AnswerDto] = jsonFormat2(AnswerDto)
-  implicit val pollJsonFormat: RootJsonFormat[Poll] = jsonFormat6(Poll)
+  implicit val pollJsonFormat: RootJsonFormat[Poll] = jsonFormat6(Poll.apply)
   implicit val pollDtoJsonFormat: RootJsonFormat[PollDto] = jsonFormat3(PollDto)
   //implicit val pollResJsonFormat: RootJsonFormat[PollResult] = jsonFormat2(PollResult)
-  implicit val answerJsonFormat: RootJsonFormat[Answer] = jsonFormat4(Answer)
+  implicit val answerJsonFormat: RootJsonFormat[Answer] = jsonFormat4(Answer.apply)
 }
 //#json-formats

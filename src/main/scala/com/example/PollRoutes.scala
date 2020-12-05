@@ -14,7 +14,7 @@ import akka.util.Timeout
 import com.example.Models._
 import com.example.PollRegistry._
 
-final case class PollDto(question: String, answers: Array[String], timeInMinutes: Int)
+final case class PollDto(question: String, answers: List[String], timeInMinutes: Int)
 final case class AnswerDto(pollId: String, answerNumber: Int)
 
 class PollRoutes(pollRegistry: ActorRef[PollRegistry.Command])(implicit val system: ActorSystem[_]) {
@@ -54,7 +54,7 @@ class PollRoutes(pollRegistry: ActorRef[PollRegistry.Command])(implicit val syst
         concat(
           post {
             entity(as[PollDto]) { p =>
-              onSuccess(createPoll( Poll(randomUUID.toString, p.question, p.answers.map(x => Vote(x, 0)), None, p.timeInMinutes, randomUUID.toString) )) { id =>
+              onSuccess(createPoll( Poll(p, randomUUID.toString) )) { id =>
                 complete((StatusCodes.Created, id))
               }
             }
@@ -63,7 +63,6 @@ class PollRoutes(pollRegistry: ActorRef[PollRegistry.Command])(implicit val syst
       path(Segment) { id =>
         concat(
           get {
-            //#retrieve-user-info
             rejectEmptyResponse {
               onSuccess(getPoll(id)) { response =>
                 complete(response)
@@ -78,7 +77,7 @@ class PollRoutes(pollRegistry: ActorRef[PollRegistry.Command])(implicit val syst
         concat(
           post {
             entity(as[AnswerDto]) { a =>
-              onSuccess(createAnswer( Answer(randomUUID.toString, a.pollId,  a.answerNumber, randomUUID.toString) )) { performed =>
+              onSuccess(createAnswer( Answer(a, randomUUID.toString) )) { performed =>
                 complete((StatusCodes.Created, performed))
               }
             }

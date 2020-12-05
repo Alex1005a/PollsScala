@@ -14,14 +14,8 @@ object PollRegistry {
   final case class GetPoll(id: String, replyTo: ActorRef[Option[Poll]]) extends Command
   final case class StartPoll(id: String, replyTo: ActorRef[Either[String, _]]) extends Command
 
-  def apply(): Behavior[Command] = registry(Set.empty, Set.empty)
-  /*
-  private def getCountArray(poll: Poll, answers: Set[Answer]): Array[Int] = {
-    poll.votes.zipWithIndex.map{ case (_, index) =>
-      answers.count(_.answerNumber == index)
-    }
-  }
-  */
+  def apply(): Behavior[Command] = registry()
+
   private def validatePollIsEmpty(pollOpt: Option[Poll]): Either[String, Poll] ={
     pollOpt.map(x => Right(x)).getOrElse(Left("Poll not found"))
   }
@@ -53,56 +47,47 @@ object PollRegistry {
     _ <- validateAnswerNumber(a, p)
   } yield Right()
 
-  /*
-  private def validatePollForStart(pollOpt: Option[Poll]): Either[String, Poll] = {
-    if(pollOpt.isEmpty) return Left("Poll not found")
-    val poll = pollOpt.get
-    if(poll.dateBegin.isDefined) return Left("Poll is already start")
-    Right(poll)
-  }
-
-  private def validatePollForAnswer(pollOpt: Option[Poll], a: Answer): Either[String, _] = {
-    if(pollOpt.isEmpty) return Left("Poll not found")
-    val p = pollOpt.get
-    if(p.dateBegin.isEmpty) return Left("Poll not start")
-    val dateBegin = p.dateBegin.get
-    if(dateBegin.plusMinutes(p.timeInMinutes).isBefore(LocalDateTime.now())) return Left("Poll finish")
-    if(a.answerNumber >= p.answers.length | a.answerNumber < 0) return Left("Answer number not valid")
-    Right()
-  }
-  */
-
-  private def registry(polls: Set[Poll], answers: Set[Answer]): Behavior[Command] =
+  private def registry(): Behavior[Command] =
     Behaviors.receiveMessage {
       case CreatePoll(poll, replyTo) =>
-        replyTo ! poll.id
-        registry(polls + poll, answers)
+        replyTo ! PollRepository.create(poll).fold(a => a, b => b)
+        Behaviors.same
+
       case GetPoll(id, replyTo) =>
-        val poll = polls.find(_.id == id)
+        val poll = PollRepository.getById(id)
         replyTo ! poll
         Behaviors.same
+
       case CreateAnswer(a, replyTo) =>
-        val p = polls.find(_.id == a.pollId)
+        val p = PollRepository.getById(a.pollId)
         val res = validatePollForAnswer(p, a)
-        replyTo ! res.map(_ => a.id)
-        res match {
-          case Left(_) => Behaviors.same
-          case Right(_) =>
-            val poll = p.get
-            val votes = poll.votes.zipWithIndex.map{ case (x, i) =>
-              if(i == a.answerNumber) x.copy(count = x.count + 1)
-              else x
-            }
-            registry(polls.filterNot(_.id == poll.id) + poll.copy(votes = votes), answers.filterNot(_.userId == a.userId) + a)
+        if(res.isLeft) {
+          replyTo ! res.map(_ => "")
+          Behaviors.same
         }
+        else {
+          val poll = p.get
+          val votes = poll.votes.zipWithIndex.map{ case (x, i) =>
+            if(i == a.answerNumber) x.copy(count = x.count + 1)
+            else x
+          }
+
+          PollRepository.update(poll.copy(votes = votes))
+          val answerCreateRes = AnswerRepository.create(a)
+          replyTo ! answerCreateRes
+
+          Behaviors.same
+        }
+
       case StartPoll(id, replyTo) =>
-        val poll = polls.find(_.id == id)
+        val poll = PollRepository.getById(id)
         val res = validatePollForStart(poll)
         replyTo ! res
         res match {
           case Left(_) => Behaviors.same
-          case Right(p) => registry(polls.filterNot(_.id == id) + p.copy(dateBegin = Some(LocalDateTime.now())), answers)
+          case Right(p) =>
+            PollRepository.update(p.copy(dateBegin = Some(LocalDateTime.now())))
+            Behaviors.same
         }
-
     }
 }
