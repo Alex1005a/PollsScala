@@ -12,7 +12,7 @@ object PollRegistry {
   final case class CreatePoll(poll: Poll, replyTo: ActorRef[String]) extends Command
   final case class CreateAnswer(user: Answer, replyTo: ActorRef[Either[String, String]]) extends Command
   final case class GetPoll(id: String, replyTo: ActorRef[Option[Poll]]) extends Command
-  final case class StartPoll(id: String, replyTo: ActorRef[Either[String, _]]) extends Command
+  final case class StartPoll(id: String, userId: String, replyTo: ActorRef[Either[String, _]]) extends Command
 
   def apply(): Behavior[Command] = registry()
 
@@ -35,9 +35,10 @@ object PollRegistry {
     Right()
   }
 
-  private def validatePollForStart(pollOpt: Option[Poll]): Either[String, Poll] = for {
+  private def validatePollForStart(pollOpt: Option[Poll], userId: String): Either[String, Poll] = for {
     p <- validatePollIsEmpty(pollOpt)
     _ <- validatePollIsNotStart(p)
+    _ <- if(p.authorId != userId) Left("User is not author this poll") else Right()
   } yield p
 
   private def validatePollForAnswer(pollOpt: Option[Poll], a: Answer): Either[String, _] = for {
@@ -45,6 +46,7 @@ object PollRegistry {
     date <- validatePollIsStart(p)
     _ <- validatePollIsNotFinish(p, date)
     _ <- validateAnswerNumber(a, p)
+    _ <- if(AnswerRepository.existWithUserId(a.userId)) Left("Answer with this user id exist") else Right()
   } yield Right()
 
   private def registry(): Behavior[Command] =
@@ -79,9 +81,9 @@ object PollRegistry {
           Behaviors.same
         }
 
-      case StartPoll(id, replyTo) =>
+      case StartPoll(id, userId, replyTo) =>
         val poll = PollRepository.getById(id)
-        val res = validatePollForStart(poll)
+        val res = validatePollForStart(poll, userId)
         replyTo ! res
         res match {
           case Left(_) => Behaviors.same

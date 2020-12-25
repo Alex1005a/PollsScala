@@ -1,7 +1,5 @@
 package com.example
 
-import java.util.UUID.randomUUID
-
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.server.Route
@@ -10,12 +8,14 @@ import scala.concurrent.Future
 import akka.actor.typed.ActorRef
 import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.AskPattern._
+import akka.http.scaladsl.server.directives.Credentials
 import akka.util.Timeout
 import com.example.Models._
 import com.example.PollRegistry._
 
 final case class PollDto(question: String, answers: List[String], timeInMinutes: Int)
 final case class AnswerDto(pollId: String, answerNumber: Int)
+final case class UserDto(name: String, password: String)
 
 class PollRoutes(pollRegistry: ActorRef[PollRegistry.Command])(implicit val system: ActorSystem[_]) {
 
@@ -30,8 +30,19 @@ class PollRoutes(pollRegistry: ActorRef[PollRegistry.Command])(implicit val syst
     pollRegistry.ask(CreatePoll(poll, _))
   def createAnswer(answer: Answer): Future[Either[String, String]] =
     pollRegistry.ask(CreateAnswer(answer, _))
-  def startPoll(id: String): Future[Either[String, _]] =
-    pollRegistry.ask(StartPoll(id, _))
+  def startPoll(id: String, userId: String): Future[Either[String, _]] =
+    pollRegistry.ask(StartPoll(id, userId, _))
+
+
+  private def myUserPassAuthenticator(credentials: Credentials): Option[String] =
+    credentials match {
+      case p @ Credentials.Provided(name) =>
+        val userOption = UserRepository.getByName(name)
+        if(userOption.isEmpty) return None
+        if(p.verify(userOption.get.password)) return Some(userOption.get._id)
+        None
+      case _ => None
+    }
 
   private val pollRoutes1: Route = pathPrefix("polls") {
     concat(
@@ -40,10 +51,12 @@ class PollRoutes(pollRegistry: ActorRef[PollRegistry.Command])(implicit val syst
           pathEnd {
             concat(
               post {
-                entity(as[String]) { id =>
-                  onSuccess(startPoll( id )) {
-                    case Right(_) => complete(StatusCodes.OK)
-                    case Left(x) => complete(StatusCodes.BadGateway, x)
+                authenticateBasic(realm = "secure", myUserPassAuthenticator) { userId =>
+                  entity(as[String]) { id =>
+                    onSuccess(startPoll(id, userId)) {
+                      case Right(_) => complete(StatusCodes.OK)
+                      case Left(x) => complete(StatusCodes.BadGateway, x)
+                    }
                   }
                 }
               })
@@ -53,9 +66,11 @@ class PollRoutes(pollRegistry: ActorRef[PollRegistry.Command])(implicit val syst
       pathEnd {
         concat(
           post {
-            entity(as[PollDto]) { p =>
-              onSuccess(createPoll( Poll(p, randomUUID.toString) )) { id =>
-                complete((StatusCodes.Created, id))
+            authenticateBasic(realm = "secure", myUserPassAuthenticator) { id =>
+              entity(as[PollDto]) { p =>
+                onSuccess(createPoll(Poll(p, id))) { id =>
+                  complete((StatusCodes.Created, id))
+                }
               }
             }
           })
@@ -76,15 +91,32 @@ class PollRoutes(pollRegistry: ActorRef[PollRegistry.Command])(implicit val syst
       pathEnd {
         concat(
           post {
-            entity(as[AnswerDto]) { a =>
-              onSuccess(createAnswer( Answer(a, randomUUID.toString) )) { performed =>
-                complete((StatusCodes.Created, performed))
+            authenticateBasic(realm = "secure", myUserPassAuthenticator) { id =>
+              entity(as[AnswerDto]) { a =>
+                onSuccess(createAnswer( Answer(a, id) )) { performed =>
+                  complete((StatusCodes.Created, performed))
+                }
               }
             }
           })
       })
   }
 
-  val pollRoutes: Route = pollRoutes1 ~ pollRoutes2
+  private val pollRoutes3: Route = pathPrefix("user") {
+    concat(
+      pathEnd {
+        concat(
+          post {
+            entity(as[UserDto]) { u =>
+              UserRepository.create(User(u.name, u.password)) match {
+                case Right(_) => complete(StatusCodes.OK)
+                case Left(x) => complete(StatusCodes.BadGateway, x)
+              }
+            }
+          })
+      })
+  }
+
+  val pollRoutes: Route = pollRoutes1 ~ pollRoutes2 ~ pollRoutes3
 }
 
